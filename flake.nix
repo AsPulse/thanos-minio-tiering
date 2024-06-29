@@ -16,6 +16,7 @@
         devShells.default = pkgs.mkShell {
           nativeBuildInputs = with pkgs; [
             libiconv
+            darwin.apple_sdk.frameworks.SystemConfiguration
           ];
           buildInputs = with pkgs; [
             rustup

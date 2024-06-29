@@ -1,14 +1,38 @@
 use clap::Parser;
 use dotenvy::dotenv;
+use thiserror::Error;
+use tracing::instrument;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
+
+use self::error::SpanErr;
+use self::minio::{MinioInstance, MinioInstanceInitializationError};
 
 pub mod config;
+pub mod error;
+pub mod minio;
+
+#[derive(Error, Debug)]
+enum ClientError {
+    #[error("at least one feature must be enabled.")]
+    NoFeatureEnabled,
+    #[error("failed to initialize source MinIO instance; {0}")]
+    SourceConfigError(#[source] MinioInstanceInitializationError),
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let _ = dotenv();
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .init();
+    tracing_subscriber::Registry::default()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
+        )
+        .with(ErrorLayer::default())
+        .try_init()
+        .expect("failed to initialize tracing subscriber");
 
     tracing::info!("thanos-minio-tiering v{}", env!("CARGO_PKG_VERSION"));
 
@@ -19,13 +43,31 @@ async fn main() {
             tracing::info!("done! {}ms", start_time.elapsed().as_millis());
         }
         Err(e) => {
-            tracing::error!("error: {:?}", e);
+            tracing::error!("{}", e.error);
+            eprintln!("{}", color_spantrace::colorize(&e.span));
         }
     }
 }
 
-async fn thanos_minio_tiering() -> Result<(), Box<dyn std::error::Error>> {
+#[instrument]
+async fn thanos_minio_tiering() -> Result<(), SpanErr<ClientError>> {
     let args = config::AppArgs::parse();
+
+    if args.dry_run {
+        tracing::warn!("running in dry-run mode");
+    }
+
+    let source = MinioInstance::new(args.source_minio_config)
+        .await
+        .map_err(|e| e.map(ClientError::SourceConfigError))?;
+    tracing::info!("source MinIO instance initialized.");
+
+    if [args.delete_all_version, args.delete_empty_blocks]
+        .iter()
+        .all(|&x| !x)
+    {
+        Err(ClientError::NoFeatureEnabled)?;
+    }
 
     Ok(())
 }
