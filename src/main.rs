@@ -7,11 +7,15 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 
+use crate::features::delete_empty_blocks::delete_empty_blocks;
+
 use self::error::SpanErr;
+use self::features::delete_empty_blocks::DeleteEmptyBlocksError;
 use self::minio::{MinioInstance, MinioInstanceInitializationError};
 
 pub mod config;
 pub mod error;
+pub mod features;
 pub mod minio;
 
 #[derive(Error, Debug)]
@@ -20,6 +24,8 @@ enum ClientError {
     NoFeatureEnabled,
     #[error("failed to initialize source MinIO instance; {0}")]
     SourceConfigError(#[source] MinioInstanceInitializationError),
+    #[error(transparent)]
+    DeleteEmptyBlocksError(#[from] DeleteEmptyBlocksError),
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -28,6 +34,7 @@ async fn main() {
     tracing_subscriber::Registry::default()
         .with(
             tracing_subscriber::fmt::layer()
+                .with_target(false)
                 .with_filter(tracing_subscriber::filter::LevelFilter::INFO),
         )
         .with(ErrorLayer::default())
@@ -62,11 +69,14 @@ async fn thanos_minio_tiering() -> Result<(), SpanErr<ClientError>> {
         .map_err(|e| e.map(ClientError::SourceConfigError))?;
     tracing::info!("source MinIO instance initialized.");
 
-    if [args.delete_all_version, args.delete_empty_blocks]
-        .iter()
-        .all(|&x| !x)
-    {
+    if [args.delete_empty_blocks].iter().all(|&x| !x) {
         Err(ClientError::NoFeatureEnabled)?;
+    }
+
+    if args.delete_empty_blocks {
+        delete_empty_blocks(&source, args.dry_run)
+            .await
+            .map_err(|e| e.map(ClientError::DeleteEmptyBlocksError))?;
     }
 
     Ok(())

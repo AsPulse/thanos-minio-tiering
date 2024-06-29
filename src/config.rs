@@ -19,9 +19,6 @@ pub(crate) struct AppArgs {
 
     #[clap(default_value = "false", long)]
     pub delete_empty_blocks: bool,
-
-    #[clap(default_value = "false", long)]
-    pub delete_all_version: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::path::PathBuf;
 
 use minio_rsc::client::Bucket;
@@ -29,8 +30,15 @@ pub enum MinioInstanceInitializationError {
 
 pub struct MinioInstance {
     pub minio: Minio,
-    pub bucket_name: String,
     pub bucket: Bucket,
+    endpoint: String,
+    bucket_name: String,
+}
+
+impl core::fmt::Debug for MinioInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.endpoint, self.bucket_name)
+    }
 }
 
 type Error = MinioInstanceInitializationError;
@@ -47,8 +55,9 @@ impl MinioInstance {
 
         let provider = StaticProvider::new(config.access_key, config.secret_key, None);
 
+        let endpoint = config.endpoint;
         let minio = Minio::builder()
-            .endpoint(config.endpoint)
+            .endpoint(endpoint.clone())
             .provider(provider)
             .secure(!config.insecure)
             .build()
@@ -60,6 +69,7 @@ impl MinioInstance {
         if bucket.exists().await.map_err(Error::MinioNetworkError)? {
             Ok(Self {
                 minio,
+                endpoint,
                 bucket,
                 bucket_name,
             })
